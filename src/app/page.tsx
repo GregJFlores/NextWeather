@@ -70,6 +70,10 @@ export default function Home() {
     );
 }
 
+const convertToCelsius = (temp: number) => {
+    return Math.round((temp - 32) * (5 / 9));
+};
+
 function WeatherComponent() {
     const [weather, setWeather] = useState<WeatherData | null>(null);
     const [forecast, setForecast] = useState<ForecastData | null>(null);
@@ -112,8 +116,8 @@ function WeatherComponent() {
 
         try {
             const [currentResponse, forecastResponse] = await Promise.all([
-                fetch(`/api/weather/current?lat=${lat}&lon=${lon}&units=${units}&limit=5`),
-                fetch(`/api/weather/forecast?lat=${lat}&lon=${lon}&units=${units}&limit=5`),
+                fetch(`/api/weather/current?lat=${lat}&lon=${lon}&units=imperial&limit=5`),
+                fetch(`/api/weather/forecast?lat=${lat}&lon=${lon}&units=imperial&limit=5`),
             ]);
 
             if (!currentResponse.ok || !forecastResponse.ok) {
@@ -148,7 +152,6 @@ function WeatherComponent() {
         setUnits(newUnits);
         if (selectedCity) {
             setInputValue(selectedCity);
-            fetchBothWeatherData(`${selectedCity}`);
         }
     };
 
@@ -202,9 +205,7 @@ function WeatherComponent() {
                                         onClick={handleUnitToggle}
                                         className="flex items-center gap-2 px-3 py-2 bg-white/10 hover:bg-white/20 border border-white/20 rounded-lg text-white font-medium transition-all"
                                     >
-                                        <span className="text-sm">
-                                            °{units === "imperial" ? "F" : "C"}
-                                        </span>
+                                        <span className="text-sm">°F</span>
                                         <div className="w-8 h-4 bg-white/20 rounded-full relative">
                                             <div
                                                 className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-all ${
@@ -212,9 +213,7 @@ function WeatherComponent() {
                                                 }`}
                                             ></div>
                                         </div>
-                                        <span className="text-sm">
-                                            °{units === "imperial" ? "C" : "F"}
-                                        </span>
+                                        <span className="text-sm">°C</span>
                                     </button>
                                 </div>
                                 <div className="flex flex-col sm:flex-row gap-3">
@@ -298,8 +297,18 @@ function CurrentWeatherCard({
     units: "metric" | "imperial";
     state?: string | null;
 }) {
-    const temp = Math.round(weather.main.temp);
-    const feelsLike = Math.round(weather.main.feels_like);
+    const [temp, setTemp] = useState(Math.round(weather.main.temp));
+    const [feelsLike, setFeelsLike] = useState(Math.round(weather.main.feels_like));
+    useEffect(() => {
+        if (units === "metric") {
+            setTemp(convertToCelsius(Math.round(weather.main.temp)));
+            setFeelsLike(convertToCelsius(Math.round(weather.main.feels_like)));
+        } else {
+            setTemp(Math.round(weather.main.temp));
+            setFeelsLike(Math.round(weather.main.feels_like));
+        }
+    }, [units]);
+
     const humidity = weather.main.humidity;
     const description = weather.weather[0].description;
     const icon = weather.weather[0].icon;
@@ -379,8 +388,19 @@ function ForecastCard({
     forecastDay: ForecastDay;
     units: "metric" | "imperial";
 }) {
-    const highTemp = Math.round(forecastDay.high);
-    const lowTemp = Math.round(forecastDay.low);
+    const [highTemp, setHighTemp] = useState(Math.round(forecastDay.high));
+    const [lowTemp, setLowTemp] = useState(Math.round(forecastDay.low));
+
+    useEffect(() => {
+        if (units === "metric") {
+            setHighTemp(convertToCelsius(Math.round(forecastDay.high)));
+            setLowTemp(convertToCelsius(Math.round(forecastDay.low)));
+        } else {
+            setHighTemp(Math.round(forecastDay.high));
+            setLowTemp(Math.round(forecastDay.low));
+        }
+    }, [units, forecastDay.high, forecastDay.low]);
+
     const description = forecastDay.items[0].weather[0].description;
     const unitSymbol = units === "imperial" ? "F" : "C";
     const formattedDate = new Date(date).toLocaleDateString("en-US", {
@@ -436,26 +456,7 @@ function ForecastCard({
                                     hour12: true,
                                 });
                                 return (
-                                    <div
-                                        key={item.dt}
-                                        className="flex justify-between items-center py-1 px-2 rounded-lg hover:bg-white/5 transition-colors"
-                                    >
-                                        <span className="text-xs sm:text-sm text-gray-400 font-medium min-w-[3rem]">
-                                            {time}
-                                        </span>
-                                        <div className="flex items-center gap-x-1.5">
-                                            <Image
-                                                src={`https://openweathermap.org/img/wn/${item.weather[0].icon}.png`}
-                                                alt={item.weather[0].description}
-                                                width={20}
-                                                height={20}
-                                                className="h-4 w-4 sm:h-5 sm:w-5 opacity-80"
-                                            />
-                                            <span className="text-xs sm:text-sm font-semibold text-white min-w-[2rem] text-right">
-                                                {Math.round(item.main.temp)}°{unitSymbol}
-                                            </span>
-                                        </div>
-                                    </div>
+                                    <HourlyForecastItem key={item.dt} item={item} units={units} />
                                 );
                             })}
                         </div>
@@ -465,3 +466,40 @@ function ForecastCard({
         </div>
     );
 }
+
+const HourlyForecastItem = ({
+    item,
+    units,
+}: {
+    item: ForecastItem;
+    units: "metric" | "imperial";
+}) => {
+    const temp =
+        units === "metric"
+            ? convertToCelsius(Math.round(item.main.temp))
+            : Math.round(item.main.temp);
+    const time = new Date(item.dt * 1000).toLocaleTimeString([], {
+        hour: "2-digit",
+        hour12: true,
+    });
+
+    return (
+        <div className="flex justify-between items-center py-1 px-2 rounded-lg hover:bg-white/5 transition-colors">
+            <span className="text-xs sm:text-sm text-gray-400 font-medium min-w-[3rem]">
+                {time}
+            </span>
+            <div className="flex items-center gap-x-1.5">
+                <Image
+                    src={`https://openweathermap.org/img/wn/${item.weather[0].icon}.png`}
+                    alt={item.weather[0].description}
+                    width={20}
+                    height={20}
+                    className="h-4 w-4 sm:h-5 sm:w-5 opacity-80"
+                />
+                <span className="text-xs sm:text-sm font-semibold text-white min-w-[2rem] text-right">
+                    {temp}°{units === "metric" ? "C" : "F"}
+                </span>
+            </div>
+        </div>
+    );
+};
