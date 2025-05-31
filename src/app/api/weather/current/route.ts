@@ -1,3 +1,4 @@
+import { rateLimiter } from "@/app/lib/rateLimiter";
 import { NextRequest, NextResponse } from "next/server";
 
 export async function GET(request: NextRequest) {
@@ -6,7 +7,18 @@ export async function GET(request: NextRequest) {
     const lon = searchParams.get("lon");
     const units = searchParams.get("units") || "metric";
 
+    if (!lat || !lon) {
+        return NextResponse.json({ error: "Latitude and longitude are required" }, { status: 400 });
+    }
+
     try {
+        const ip = request.headers.get("x-forwarded-for") ?? "anonymous";
+        const passed = await rateLimiter.check(ip);
+
+        if (!passed) {
+            return NextResponse.json({ error: "Rate limit exceeded" }, { status: 429 });
+        }
+
         const apiKey = process.env.OPEN_WEATHER_API_KEY;
         const baseUrl = process.env.OPENWEATHER_CURRENT_WEATHER_BASE_URL;
 

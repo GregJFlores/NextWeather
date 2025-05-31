@@ -1,8 +1,8 @@
-import Image from "next/image";
-import HourlyForecastItem from "./HourlyForecastItem";
 import { convertToCelsius } from "@/app/lib/temperature";
-import { useEffect, useState } from "react";
 import { ForecastDay } from "@/types/weather";
+import Image from "next/image";
+import { useEffect, useState } from "react";
+import HourlyForecastItem from "./HourlyForecastItem";
 
 function ForecastCard({
     date,
@@ -33,6 +33,8 @@ function ForecastCard({
         month: "short",
         day: "numeric",
     });
+
+    console.log("Rendering ForecastCard for date:", formattedDate, "with units:", units);
 
     return (
         <div className="relative overflow-hidden rounded-2xl bg-gradient-to-b from-gray-800/90 to-gray-900/95 p-4 sm:p-6 shadow-2xl ring-1 ring-white/10 backdrop-blur-sm hover:ring-white/20 transition-all duration-300 hover:shadow-3xl hover:scale-[1.02]">
@@ -76,10 +78,6 @@ function ForecastCard({
                         </h4>
                         <div className="space-y-1.5 max-h-32 sm:max-h-40 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-600 scrollbar-track-transparent">
                             {forecastDay.items.map((item) => {
-                                const time = new Date(item.dt * 1000).toLocaleTimeString([], {
-                                    hour: "2-digit",
-                                    hour12: true,
-                                });
                                 return (
                                     <HourlyForecastItem key={item.dt} item={item} units={units} />
                                 );

@@ -1,9 +1,17 @@
 "use client";
 import CurrentWeatherCard from "@/components/CurrentWeatherCard";
 import ForecastCard from "@/components/ForecastCard";
-import { ForecastData, ForecastDay, ForecastWeek, WeatherData } from "@/types/weather";
+import {
+    CurrentWeatherResponse,
+    ForecastDay,
+    ForecastWeek,
+    WeatherForecastResponse,
+} from "@/types/weather";
 
-import { useState, useEffect } from "react";
+import { GeocodingResponse } from "@/types/geo";
+import { useState } from "react";
+import { getCityData } from "./lib/geoService";
+import { getWeatherForCity } from "./lib/weatherService";
 
 export default function Home() {
     return (
@@ -19,75 +27,74 @@ export default function Home() {
 }
 
 function WeatherComponent() {
-    const [weather, setWeather] = useState<WeatherData | null>(null);
-    const [forecast, setForecast] = useState<ForecastData | null>(null);
+    const [weather, setWeather] = useState<CurrentWeatherResponse | null>(null);
+    const [forecast, setForecast] = useState<WeatherForecastResponse | null>(null);
     const [forecastWeek, setForecastWeek] = useState<ForecastWeek | null>(null);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
-    const [selectedCity, setSelectedCity] = useState("San Antonio");
+    const [selectedCity, setSelectedCity] = useState("");
     const [selectedState, setSelectedState] = useState<string | null>(null);
-    const [inputValue, setInputValue] = useState("San Antonio");
+    const [inputValue, setInputValue] = useState("");
     const [units, setUnits] = useState<"metric" | "imperial">("imperial");
+    const [cooldown, setCooldown] = useState(false);
 
-    const fetchLatLon = async (city: string) => {
-        setLoading(true);
-        setError(null);
-        try {
-            const response = await fetch(`/api/geo?city=${encodeURIComponent(city)}`);
-            if (!response.ok) {
-                throw new Error("Failed to fetch latitude and longitude");
-            }
-            const data = await response.json();
-            return data;
-        } catch (err) {
-            setError(err instanceof Error ? err.message : "An error occurred");
-            return null;
-        } finally {
-            setLoading(false);
+    const fetchWeatherData = async (city: string) => {
+        if (cooldown) {
+            setError("Please wait before making another request.");
+            return;
         }
-    };
-
-    const fetchBothWeatherData = async (city: string) => {
         setLoading(true);
         setError(null);
 
-        const latLon = await fetchLatLon(city);
-        if (!latLon) {
+        const weatherForCity = await getWeatherForCity(city);
+        if (!weatherForCity) {
+            setError("Failed to fetch weather data. Please try again.");
             setLoading(false);
             return;
         }
-        const { lat, lon, state } = latLon[0];
+        const {
+            current: currentData,
+            forecast: forecastData,
+        }: { current: CurrentWeatherResponse; forecast: WeatherForecastResponse } = weatherForCity;
+        if (!currentData || !forecastData) {
+            setError("No weather data found for the specified city.");
+            setLoading(false);
+            return;
+        }
+        const cityData: GeocodingResponse = await getCityData(city);
+        if (!cityData || cityData.length === 0) {
+            setError(`No coordinates found for city: ${city}`);
+            setLoading(false);
+            return;
+        }
+        const { state } = cityData[0];
+        if (!state) {
+            setError(`No state information found for city: ${city}`);
+            setLoading(false);
+            return;
+        }
 
         try {
-            const [currentResponse, forecastResponse] = await Promise.all([
-                fetch(`/api/weather/current?lat=${lat}&lon=${lon}&units=imperial&limit=5`),
-                fetch(`/api/weather/forecast?lat=${lat}&lon=${lon}&units=imperial&limit=5`),
-            ]);
-
-            if (!currentResponse.ok || !forecastResponse.ok) {
-                throw new Error("Failed to fetch weather data");
-            }
-
-            const [currentData, forecastData] = await Promise.all([
-                currentResponse.json(),
-                forecastResponse.json(),
-            ]);
-
             setSelectedState(state);
             setWeather(currentData);
             setForecast(forecastData);
             setSelectedCity(city);
+            setForecastWeek(getForecastWeek(forecastData));
+            setCooldown(true);
         } catch (err) {
             setError(err instanceof Error ? err.message : "An error occurred");
         } finally {
             setLoading(false);
+            setTimeout(() => setCooldown(false), 3000);
         }
     };
 
+    const isValidCityName = (input: string) => /^[a-zA-Z\s\-']{2,100}$/.test(input);
+
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        if (inputValue.trim()) {
-            fetchBothWeatherData(inputValue.trim());
+        if (inputValue.trim() && isValidCityName(inputValue.trim())) {
+            fetchWeatherData(inputValue.trim());
         }
     };
 
@@ -99,38 +106,47 @@ function WeatherComponent() {
         }
     };
 
-    const getForecastWeek = (forecastData: ForecastData): ForecastWeek => {
+    const getForecastWeek = (forecastData: WeatherForecastResponse): ForecastWeek => {
+        const timezoneOffset = forecastData.city.timezone; // in seconds
+
         const daysMap: { [key: string]: ForecastDay } = {};
+
         forecastData.list.forEach((item) => {
-            const date = new Date(item.dt * 1000);
-            const dateString = date.toISOString().split("T")[0]; // Get YYYY-MM-DD format
+            // Apply timezone offset to get correct local date
+            const localDate = new Date((item.dt + timezoneOffset) * 1000);
+            const dateString = localDate.toISOString().split("T")[0]; // YYYY-MM-DD in local time
+
             if (!daysMap[dateString]) {
                 daysMap[dateString] = {
                     date: dateString,
-                    high: item.main.temp,
-                    low: item.main.temp,
+                    high: item.main.temp_max,
+                    low: item.main.temp_min,
                     items: [],
                 };
+            } else {
+                // Update high/low
+                daysMap[dateString].high = Math.max(daysMap[dateString].high, item.main.temp_max);
+                daysMap[dateString].low = Math.min(daysMap[dateString].low, item.main.temp_min);
             }
+
             daysMap[dateString].items.push(item);
-            daysMap[dateString].high = Math.max(daysMap[dateString].high, item.main.temp);
-            daysMap[dateString].low = Math.min(daysMap[dateString].low, item.main.temp);
         });
-        const days = Object.values(daysMap).sort(
+
+        // Sort hourly items in each day
+        Object.values(daysMap).forEach((day) => {
+            day.items.sort((a, b) => a.dt - b.dt);
+        });
+
+        // Return a sorted array of days
+        const daysArray = Object.values(daysMap).sort(
             (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()
         );
+
         return {
-            days,
+            days: daysArray,
             city: forecastData.city,
         };
     };
-
-    useEffect(() => {
-        if (forecast) {
-            const week = getForecastWeek(forecast);
-            setForecastWeek(week);
-        }
-    }, [forecast]);
 
     return (
         <div className="min-h-screen bg-gradient-to-br from-gray-900 via-blue-900 to-gray-900 py-8">
@@ -210,7 +226,7 @@ function WeatherComponent() {
                     <div className="mt-8">
                         <div className="text-center flex justify-center items-center gap-x-2 text-2xl font-bold text-white mb-6">
                             <h2>
-                                5-Day Forecast for {forecast.city.name}, {selectedState}
+                                5-Day Forecast for {forecast?.city?.name}, {selectedState}
                             </h2>
                         </div>
                         <div className="mx-auto max-w-full px-6 lg:px-8">
